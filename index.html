@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>html,body{margin:0;padding:0}</style>
+<title>天球星圖</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: full-bleed sky canvas; one control panel top-left, readout bar bottom, zoom keys right.
+   Single deliberate dark look (night-sky tool), amber reserved for the user's selected point. */
+:root{
+  --bg:#04060d;
+  --panel:rgba(9,13,25,.80);
+  --line:rgba(150,180,230,.20);
+  --fg:#dde6f7;
+  --muted:#8494b2;
+  --accent:#ffb347;
+  --accent-ink:#1b1204;
+  --bad:#ff8585;
+  --font:'Noto Sans TC',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{position:relative;background:var(--bg);color:var(--fg);font:14px/1.5 var(--font);overflow:hidden}
+#stage{position:absolute;inset:0}
+#sky{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair;background:var(--bg)}
+#sky.grabbing{cursor:grabbing}
+
+#ui{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;gap:8px;
+  padding-block:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px))}
+#panel{pointer-events:auto;align-self:flex-start;width:min(330px,100%);min-height:0;display:flex;flex-direction:column;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+#phead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px 10px 14px}
+#phead h1{margin:0;font-size:15px;font-weight:700;letter-spacing:.08em}
+#phead small{color:var(--muted);font-size:11px;margin-left:8px;font-weight:400;letter-spacing:0}
+#pbody{overflow:auto;min-height:0;padding:0 14px 14px;display:flex;flex-direction:column;gap:14px}
+#panel[data-collapsed="true"] #pbody{display:none}
+.sec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sec+.sec{border-top:1px solid var(--line);padding-top:12px}
+.sec>h2{margin:0;font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.14em;text-transform:uppercase}
+details>summary{cursor:pointer;list-style:none;font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;display:flex;justify-content:space-between}
+details>summary::-webkit-details-marker{display:none}
+details>summary::after{content:"＋";letter-spacing:0}
+details[open]>summary::after{content:"－"}
+details[open]>summary{margin-bottom:8px}
+
+form{display:flex;flex-direction:column;gap:10px}
+.field{display:flex;flex-direction:column;gap:3px;min-width:0}
+.field>span{font-size:12px;color:var(--muted)}
+.row{display:flex;gap:8px;min-width:0}
+.row>*{min-width:0}
+input[type=text],select{font:16px/1.3 var(--mono);color:var(--fg);background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%;box-sizing:border-box}
+select{width:auto;flex:0 0 auto;font-family:var(--font);font-size:15px}
+input[type=text]:focus,select:focus,button:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+input[aria-invalid="true"]{border-color:var(--bad)}
+button{font:500 14px var(--font);color:var(--fg);background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:6px;padding:7px 12px;cursor:pointer}
+button:hover{background:rgba(255,255,255,.12)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:700;flex:1}
+button.primary:hover{filter:brightness(1.08)}
+#msg{margin:0;min-height:1.4em;font-size:12px;color:var(--muted)}
+#msg.err{color:var(--bad)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{padding:4px 10px;font-size:12px;border-radius:99px}
+.layers{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px}
+.layers label{display:flex;align-items:center;gap:7px;font-size:13px;cursor:pointer}
+.layers input{accent-color:var(--accent);width:16px;height:16px;margin:0}
+#sel dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0;font-size:13px}
+#sel dt{color:var(--muted)}
+#sel dd{margin:0;font-family:var(--mono);font-size:12.5px;overflow-wrap:anywhere}
+#sel .name{font-weight:700;color:var(--accent);margin:0 0 2px;font-size:14px}
+#sel .none{color:var(--muted);font-size:13px;margin:0}
+.fine{margin:0;font-size:11px;color:var(--muted);line-height:1.5}
+
+#zoomkeys{position:absolute;pointer-events:auto;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:6px;
+  right:max(16px,env(safe-area-inset-right,0px))}
+#zoomkeys button{width:38px;height:38px;padding:0;font-size:20px;line-height:1;background:var(--panel);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+#bar{pointer-events:none;align-self:stretch;display:flex;flex-wrap:wrap;gap:2px 20px;background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  padding:7px 12px;font:12px/1.5 var(--mono);color:var(--fg);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+#bar b{font-weight:500;color:var(--muted);margin-right:6px}
+#bar .hint{color:var(--muted);margin-left:auto}
+@media (max-width:640px){#bar .hint{display:none}#pbody{max-height:58vh}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<main id="stage">
+  <canvas id="sky" aria-label="天球星圖，可拖曳平移、滾輪縮放、點擊選取座標" data-i18n-aria="canvasAria" tabindex="0"></canvas>
+  <div id="ui">
+    <section id="panel" data-collapsed="false">
+      <div id="phead">
+        <h1><span data-i18n="title">天球星圖</span><small data-i18n="sub">J2000 · 赤道座標</small></h1>
+        <div class="row"><button type="button" id="lang" aria-label="Language / 語言">EN</button><button type="button" id="collapse" aria-expanded="true" aria-controls="pbody">收合</button></div>
+      </div>
+      <div id="pbody">
+        <div class="sec">
+          <h2 data-i18n="goto">前往座標</h2>
+          <form id="goto" autocomplete="off" novalidate>
+            <label class="field"><span data-i18n="ra">赤經 RA</span>
+              <div class="row"><input type="text" id="ra" placeholder="05h 35m 17s 或 83.82" data-i18n-ph="phRA" spellcheck="false">
+              <select id="raUnit" aria-label="赤經單位" data-i18n-aria="raUnitAria"><option value="auto" data-i18n="auto">自動</option><option value="h" data-i18n="hours">時</option><option value="d" data-i18n="degs">度</option></select></div></label>
+            <label class="field"><span data-i18n="dec">赤緯 Dec</span>
+              <input type="text" id="dec" placeholder="−05° 23′ 28″ 或 -5.39" data-i18n-ph="phDec" spellcheck="false"></label>
+            <label class="field"><span data-i18n="fov">天區大小 FOV（畫面短邊的視角）</span>
+              <div class="row"><input type="text" id="fov" value="60" inputmode="decimal" spellcheck="false">
+              <select id="unit" aria-label="視場單位" data-i18n-aria="unitAria"><option value="1">°</option><option value="60">′</option><option value="3600">″</option></select></div></label>
+            <div class="row"><button class="primary" type="submit" data-i18n="go">前往</button><button type="button" id="readc" data-i18n="readc">讀取畫面中心</button></div>
+            <p id="msg" role="status"></p>
+          </form>
+        </div>
+        <div class="sec" id="sel" aria-live="polite"></div>
+        <div class="sec"><details><summary data-i18n="presets">預設目標</summary><div class="chips" id="presets"></div></details></div>
+        <div class="sec"><details open><summary data-i18n="layers">圖層</summary><div class="layers" id="layers"></div></details></div>
+        <p class="fine" id="catnote"></p>
+      </div>
+    </section>
+    <div id="zoomkeys"><button type="button" id="zin" aria-label="放大" data-i18n-aria="zin">+</button><button type="button" id="zout" aria-label="縮小" data-i18n-aria="zout">−</button></div>
+    <div id="bar">
+      <span><b data-i18n="hover">游標</b><span id="hov">—</span></span>
+      <span><b data-i18n="center">中心</b><span id="ctr">—</span></span>
+      <span><b data-i18n="fovl">視場</b><span id="fovread">—</span></span>
+      <span class="hint" data-i18n="hint">拖曳平移 · 滾輪縮放 · 點擊選點 · 雙擊放大</span>
+    </div>
+  </div>
+</main>
+
+<script>
+//<core>
+const D2R=Math.PI/180,R2D=180/Math.PI,TAU=Math.PI*2;
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const norm360=d=>((d%360)+360)%360;
+const normRad=r=>((r%TAU)+TAU)%TAU;
+const angDiff=(a,b)=>{let d=(a-b)%TAU;if(d>Math.PI)d-=TAU;if(d<-Math.PI)d+=TAU;return d;};
+const pad=(n,w=2)=>String(n).padStart(w,'0');
+
+/* ---- view + stereographic projection (north up, east left) ---- */
+const V={ra:0,dec:0,fov:60,sd:0,cd:1,S:1,cx:0,cy:0,W:0,H:0};
+function updateScale(){const R=Math.min(V.W,V.H)||1;V.S=(R/2)/(2*Math.tan(V.fov*D2R/4));}
+function setSize(W,H){V.W=W;V.H=H;V.cx=W/2;V.cy=H/2;updateScale();}
+function setView(ra,dec,fov){
+  V.ra=normRad(ra);V.dec=clamp(dec,-1.5707953,1.5707953);V.fov=clamp(fov,0.001,180);
+  V.sd=Math.sin(V.dec);V.cd=Math.cos(V.dec);updateScale();
+}
+function project(ra,dec,o){
+  const dra=ra-V.ra,cd=Math.cos(dec),sd=Math.sin(dec),cdr=Math.cos(dra);
+  const cosc=V.sd*sd+V.cd*cd*cdr;
+  if(cosc<-0.995)return false;
+  const k=2/(1+cosc);
+  o.x=V.cx-k*cd*Math.sin(dra)*V.S;
+  o.y=V.cy-k*(V.cd*sd-V.sd*cd*cdr)*V.S;
+  o.k=k;
+  return true;
+}
+function unproject(px,py){
+  const x=(V.cx-px)/V.S,y=(V.cy-py)/V.S,rho=Math.hypot(x,y);
+  if(rho<1e-14)return{ra:V.ra,dec:V.dec};
+  const c=2*Math.atan(rho/2),sc=Math.sin(c),cc=Math.cos(c);
+  const dec=Math.asin(clamp(cc*V.sd+y*sc*V.cd/rho,-1,1));
+  const ra=V.ra+Math.atan2(x*sc,rho*V.cd*cc-y*V.sd*sc);
+  return{ra:normRad(ra),dec};
+}
+function anchorTo(sky,px,py){
+  for(let i=0;i<10;i++){
+    const c=unproject(px,py);
+    const dr=angDiff(sky.ra,c.ra),dd=sky.dec-c.dec;
+    if(Math.abs(dr)+Math.abs(dd)<1e-11)break;
+    setView(V.ra+dr,V.dec+dd,V.fov);
+  }
+}
+function sep(a1,d1,a2,d2){return Math.acos(clamp(Math.sin(d1)*Math.sin(d2)+Math.cos(d1)*Math.cos(d2)*Math.cos(a1-a2),-1,1));}
+
+/* ---- galactic <-> equatorial (J2000 rotation matrix) ---- */
+const GM=[[-0.0548755604,-0.8734370902,-0.4838350155],[0.4941094279,-0.4448296300,0.7469822445],[-0.8676661490,-0.1980763734,0.4559837762]];
+function galToEq(l,b){
+  const x=Math.cos(b)*Math.cos(l),y=Math.cos(b)*Math.sin(l),z=Math.sin(b);
+  const ex=GM[0][0]*x+GM[1][0]*y+GM[2][0]*z,ey=GM[0][1]*x+GM[1][1]*y+GM[2][1]*z,ez=GM[0][2]*x+GM[1][2]*y+GM[2][2]*z;
+  return{ra:normRad(Math.atan2(ey,ex)),dec:Math.asin(clamp(ez,-1,1))};
+}
+function eqToGal(ra,dec){
+  const x=Math.cos(dec)*Math.cos(ra),y=Math.cos(dec)*Math.sin(ra),z=Math.sin(dec);
+  const gx=GM[0][0]*x+GM[0][1]*y+GM[0][2]*z,gy=GM[1][0]*x+GM[1][1]*y+GM[1][2]*z,gz=GM[2][0]*x+GM[2][1]*y+GM[2][2]*z;
+  return{l:normRad(Math.atan2(gy,gx)),b:Math.asin(clamp(gz,-1,1))};
+}
+
+/* ---- parsing user input ---- */
+function nums(s){const m=s.match(/\d+(?:\.\d+)?|\.\d+/g);return m?m.map(Number):[];}
+function cleanStr(s){return String(s).trim().toLowerCase().replace(/[−–—]/g,'-').replace(/,/g,'.');}
+function parseRA(str,unit){
+  const s=cleanStr(str);if(!s)return NaN;
+  const n=nums(s);if(!n.length||n.length>3)return NaN;
+  if(n.length>1&&(n[1]>=60||(n[2]||0)>=60))return NaN;
+  const val=n[0]+(n[1]||0)/60+(n[2]||0)/3600;
+  let hours;
+  if(unit==='h')hours=true;
+  else if(unit==='d')hours=false;
+  else if(/h/.test(s))hours=true;
+  else if(/[°d]/.test(s))hours=false;
+  else hours=/:/.test(s)||n.length>=2;
+  const deg=hours?val*15:val;
+  if(!isFinite(deg)||deg>360)return NaN;
+  return /^-/.test(s)?norm360(-deg):norm360(deg);
+}
+function parseDec(str){
+  const s=cleanStr(str);if(!s)return NaN;
+  const n=nums(s);if(!n.length||n.length>3)return NaN;
+  if(n.length>1&&(n[1]>=60||(n[2]||0)>=60))return NaN;
+  const val=n[0]+(n[1]||0)/60+(n[2]||0)/3600;
+  if(!isFinite(val)||val>90)return NaN;
+  return /^-/.test(s)?-val:val;
+}
+function parseFov(str,unitDiv){
+  const s=cleanStr(str);const n=nums(s);if(n.length!==1)return NaN;
+  const deg=n[0]/unitDiv;
+  return(deg>=0.0005&&deg<=180)?deg:NaN;
+}
+
+/* ---- formatting ---- */
+function fmtHMS(raDeg,prec){
+  const f=Math.pow(10,prec);let t=norm360(raDeg)/15*3600;t=Math.round(t*f)/f;if(t>=86400)t-=86400;
+  const h=Math.floor(t/3600),m=Math.floor((t-h*3600)/60),s=t-h*3600-m*60;
+  return pad(h)+'h '+pad(m)+'m '+s.toFixed(prec).padStart(prec?3+prec:2,'0')+'s';
+}
+function fmtDMS(dec,prec){
+  const f=Math.pow(10,prec),sg=dec<0?'−':'+';let t=Math.round(Math.abs(dec)*3600*f)/f;
+  const d=Math.floor(t/3600),m=Math.floor((t-d*3600)/60),s=t-d*3600-m*60;
+  return sg+pad(d)+'° '+pad(m)+'′ '+s.toFixed(prec).padStart(prec?3+prec:2,'0')+'″';
+}
+function labRA(raDeg,stepDeg){
+  const stepS=stepDeg/15*3600;let t=Math.round(norm360(raDeg)/15*3600*1000)/1000;if(t>=86400)t-=86400;
+  const h=Math.floor(t/3600+1e-9);if(stepS>=3600-1e-6)return h+'h';
+  const m=Math.floor((t-h*3600)/60+1e-9);if(stepS>=60-1e-6)return h+'h '+pad(m)+'m';
+  const s=t-h*3600-m*60;return h+'h '+pad(m)+'m '+s.toFixed(stepS>=1?0:stepS>=0.1?1:2)+'s';
+}
+function labDec(dec,stepDeg){
+  const stepA=stepDeg*3600,sg=dec<0?'−':dec>0?'+':'';const t=Math.round(Math.abs(dec)*3600*1000)/1000;
+  const d=Math.floor(t/3600+1e-9);if(stepA>=3600-1e-6)return sg+d+'°';
+  const m=Math.floor((t-d*3600)/60+1e-9);if(stepA>=60-1e-6)return sg+d+'° '+pad(m)+'′';
+  const s=t-d*3600-m*60;return sg+d+'° '+pad(m)+'′ '+s.toFixed(stepA>=1?0:stepA>=0.1?1:2)+'″';
+}
+function fmtAng(deg){
+  if(deg>=1)return deg.toFixed(deg>=10?1:2)+'°';
+  if(deg>=1/60)return(deg*60).toFixed(deg*60>=10?1:2)+'′';
+  return(deg*3600).toFixed(deg*3600>=10?1:2)+'″';
+}
+const GRID_STEPS=[30,15,10,5,2,1,0.5,0.25,1/6,1/12,1/30,1/60,1/120,1/300,1/600,1/1800,1/3600];
+function pickStep(target){for(const s of GRID_STEPS)if(s<=target+1e-12)return s;return GRID_STEPS[GRID_STEPS.length-1];}
+
+/* ---- catalogue: bright stars (key|name|RA hours|Dec deg|mag) ---- */
+const STAR_SRC=`sir|Sirius|6.7525|-16.7161|-1.46
+can|Canopus|6.3992|-52.6957|-0.74
+arc|Arcturus|14.2610|19.1824|-0.05
+rkn|Rigil Kentaurus|14.6600|-60.8354|-0.01
+veg|Vega|18.6156|38.7837|0.03
+cap|Capella|5.2782|45.9980|0.08
+rig|Rigel|5.2423|-8.2016|0.13
+pro|Procyon|7.6550|5.2250|0.34
+bet|Betelgeuse|5.9195|7.4071|0.42
+ach|Achernar|1.6286|-57.2367|0.46
+had|Hadar|14.0637|-60.3730|0.61
+atl|Altair|19.8464|8.8683|0.76
+acx|Acrux|12.4433|-63.0991|0.76
+ald|Aldebaran|4.5987|16.5093|0.86
+ant|Antares|16.4901|-26.4320|0.96
+spi|Spica|13.4199|-11.1613|0.98
+pol|Pollux|7.7553|28.0262|1.14
+fom|Fomalhaut|22.9608|-29.6222|1.16
+den|Deneb|20.6905|45.2803|1.25
+mim|Mimosa|12.7953|-59.6888|1.25
+reg|Regulus|10.1395|11.9672|1.35
+adh|Adhara|6.9771|-28.9721|1.50
+cas|Castor|7.5767|31.8883|1.58
+gac|Gacrux|12.5194|-57.1132|1.64
+sha|Shaula|17.5601|-37.1038|1.62
+bel|Bellatrix|5.4189|6.3497|1.64
+eln|Elnath|5.4382|28.6075|1.65
+mia|Miaplacidus|9.2200|-69.7172|1.67
+aln|Alnilam|5.6036|-1.2019|1.69
+anr|Alnair|22.1372|-46.9610|1.74
+ank|Alnitak|5.6793|-1.9426|1.77
+ali|Alioth|12.9005|55.9598|1.77
+dub|Dubhe|11.0621|61.7510|1.79
+mir|Mirfak|3.4054|49.8612|1.79
+wez|Wezen|7.1399|-26.3932|1.84
+sar|Sargas|17.6220|-42.9978|1.87
+kau|Kaus Australis|18.4029|-34.3846|1.85
+alk|Alkaid|13.7923|49.3133|1.86
+avi|Avior|8.3752|-59.5095|1.86
+mnk|Menkalinan|5.9921|44.9474|1.90
+atr|Atria|16.8111|-69.0277|1.92
+alh|Alhena|6.6285|16.3993|1.93
+pea|Peacock|20.4275|-56.7351|1.94
+pla|Polaris|2.5303|89.2641|1.98
+mrz|Mirzam|6.3783|-17.9559|1.98
+alp|Alphard|9.4598|-8.6586|1.98
+ham|Hamal|2.1195|23.4624|2.00
+alg|Algieba|10.3329|19.8415|2.01
+dip|Diphda|0.7265|-17.9866|2.04
+nun|Nunki|18.9211|-26.2967|2.05
+mnt|Menkent|14.1114|-36.3700|2.06
+mrc|Mirach|1.1622|35.6206|2.06
+apz|Alpheratz|0.1398|29.0905|2.06
+ras|Rasalhague|17.5822|12.5600|2.08
+koc|Kochab|14.8451|74.1555|2.08
+sai|Saiph|5.7959|-9.6697|2.06
+dnb|Denebola|11.8177|14.5721|2.14
+agl|Algol|3.1361|40.9556|2.12
+tia|Tiaki|22.7111|-46.8846|2.10
+miz|Mizar|13.3987|54.9254|2.23
+mer|Merak|11.0307|56.3824|2.37
+phe|Phecda|11.8972|53.6948|2.44
+meg|Megrez|12.2571|57.0326|3.31
+sch|Schedar|0.6751|56.5373|2.24
+elt|Eltanin|17.9434|51.4889|2.23
+aph|Alphecca|15.5781|26.7147|2.23
+eni|Enif|21.7364|9.8750|2.39
+sad|Sadr|20.3705|40.2567|2.23
+alm|Almach|2.0650|42.3297|2.10
+cph|Caph|0.1529|59.1498|2.27
+nav|Navi|0.9451|60.7167|2.47
+ruc|Ruchbah|1.4303|60.2353|2.68
+seg|Segin|1.9066|63.6700|3.38
+sct|Scheat|23.0629|28.0828|2.42
+mkb|Markab|23.0794|15.2053|2.49
+agb|Algenib|0.2206|15.1836|2.83
+min|Mintaka|5.5334|-0.2991|2.23
+cur|Cursa|5.1308|-5.0857|2.78
+sab|Sabik|17.1730|-15.7249|2.43
+zsh|Zubeneschamali|15.2835|-9.3829|2.61
+zbg|Zubenelgenubi|14.8480|-16.0418|2.75
+dsc|Dschubba|16.0056|-22.6217|2.32
+gra|Graffias|16.0906|-19.8054|2.62
+kor|Kornephoros|16.5037|21.4896|2.77
+unu|Unukalhai|15.7378|6.4256|2.65
+alb|Albireo|19.5120|27.9597|3.18
+shl|Sheliak|18.8347|33.3627|3.52
+sul|Sulafat|18.9824|32.6896|3.25
+dcy|Delta Cygni|19.7496|45.1308|2.87
+ecy|Gienah Cygni|20.7702|33.9703|2.46
+tar|Tarazed|19.7710|10.6133|2.72
+asn|Alshain|19.9219|6.4068|3.71
+mnr|Menkar|3.0380|4.0897|2.53
+gie|Gienah|12.2634|-17.5419|2.59
+agr|Algorab|12.4977|-16.5155|2.95
+kra|Kraz|12.5732|-23.3968|2.65
+ecv|Epsilon Corvi|12.1685|-22.6198|3.00
+tsc|Tau Scorpii|16.5981|-28.2160|2.82
+esc|Epsilon Scorpii|16.8360|-34.2932|2.29
+msc|Mu Scorpii|16.8645|-38.0474|3.00
+zsc|Zeta Scorpii|16.9092|-42.3612|3.62
+hsc|Eta Scorpii|17.2026|-43.2392|3.33
+isc|Iota Scorpii|17.7933|-40.1270|2.99
+ksc|Kappa Scorpii|17.7081|-39.0300|2.39
+les|Lesath|17.5127|-37.2959|2.69
+hlf|Eta Leonis|10.1222|16.7627|3.52
+zel|Adhafera|10.2782|23.4173|3.44
+mul|Rasalas|9.8793|26.0070|3.88
+els|Algenubi|9.7641|23.7743|2.98
+zos|Zosma|11.2351|20.5237|2.56
+tch|Chertan|11.2373|15.4296|3.34
+mbs|Mebsuta|6.7322|25.1311|3.06
+tej|Tejat|6.3827|22.5136|2.88
+prp|Propus|6.2480|22.5068|3.28
+wsa|Wasat|7.3354|21.9823|3.53
+mek|Mekbuda|7.0686|20.5703|3.79
+zta|Zeta Tauri|5.6274|21.1426|3.00
+ain|Ain|4.4767|19.1804|3.53
+ths|Theta Tauri|4.4783|15.8709|3.40
+gta|Gamma Tauri|4.3299|15.6276|3.65
+mei|Meissa|5.5855|9.9342|3.39
+alu|Aludra|7.4016|-29.3031|2.45
+mul2|Muliphein|7.0627|-15.6333|4.11
+izr|Izar|14.7498|27.0742|2.70
+nek|Nekkar|15.0324|40.3906|3.49
+seq|Seginus|14.5346|38.3083|3.03
+rho|Rho Bootis|14.5310|30.3714|3.58
+dcr|Delta Crucis|12.2524|-58.7489|2.80
+pih|Pi Herculis|17.2510|36.8092|3.16
+eth|Eta Herculis|16.7149|38.9223|3.53
+zhe|Zeta Herculis|16.6885|31.6027|2.81
+ehe|Epsilon Herculis|17.0050|30.9260|3.92
+dhe|Sarin|17.2504|24.8392|3.14
+rgl|Rasalgethi|17.2441|14.3903|3.48
+asc|Ascella|19.0435|-29.8801|2.59
+kam|Kaus Media|18.3502|-29.8281|2.70
+kab|Kaus Borealis|18.4662|-25.4217|2.81
+phs|Phi Sagittarii|18.7609|-26.9908|3.17
+tsg|Tau Sagittarii|19.1156|-27.6704|3.32
+asl|Alnasl|18.0966|-30.4241|2.99
+por|Porrima|12.6943|-1.4494|2.74
+vin|Vindemiatrix|13.0363|10.9592|2.83
+zav|Zavijava|11.8450|1.7647|3.61
+hez|Heze|13.5782|-0.5958|3.37
+nus|Nusakan|15.4637|29.1057|3.68
+tcr|Theta Coronae Borealis|15.5491|31.3591|4.14
+gcr|Gamma Coronae Borealis|15.7126|26.2957|3.84
+dcb|Delta Coronae Borealis|15.8261|26.0679|4.63
+tha|Theta Aurigae|5.9954|37.2127|2.62
+iau|Iota Aurigae|4.9499|33.1661|2.69
+she|Sheratan|1.9107|20.8080|2.64
+mes|Mesarthim|1.8922|19.2978|3.88
+yld|Yildun|17.5369|86.5862|4.35
+eum|Epsilon Ursae Minoris|16.7662|82.0373|4.23
+zeu|Zeta Ursae Minoris|15.7343|77.7945|4.32
+etu|Eta Ursae Minoris|16.2918|75.7553|4.95
+phk|Pherkad|15.3455|71.8340|3.05
+zlr|Zeta Lyrae|18.7461|37.6051|4.34
+dlr|Delta Lyrae|18.9084|36.8986|4.22
+rst|Rastaban|17.5072|52.3014|2.79
+gru|Grumium|17.8919|56.8727|3.75
+ceb|Cebalrai|17.7245|4.5673|2.77
+asp|Aspidiske|9.2848|-59.2752|2.25
+rgr|Regor|8.1587|-47.3452|1.78
+suh|Suhail|9.1333|-43.4326|2.21
+mrk|Markeb|9.3686|-55.0107|2.47
+gtr|Gamma Trianguli Australis|15.3154|-68.6795|2.87
+btr|Beta Trianguli Australis|15.9190|-63.4307|2.85`;
+const STARS=STAR_SRC.split('\n').map(l=>{const p=l.split('|');return{k:p[0],n:p[1],ra:parseFloat(p[2])*15*D2R,dec:parseFloat(p[3])*D2R,mag:parseFloat(p[4])};}).sort((a,b)=>a.mag-b.mag);
+const SKEY={};STARS.forEach(s=>{SKEY[s.k]=s;});
+
+/* ---- constellation figures (names in zh-TW) ---- */
+const CONS=[
+['獵戶座','mei-bet mei-bel bet-ank bel-min min-aln aln-ank ank-sai min-rig'],
+['大熊座','dub-mer mer-phe phe-meg meg-dub meg-ali ali-miz miz-alk'],
+['小熊座','pla-yld yld-eum eum-zeu zeu-etu etu-phk phk-koc koc-zeu'],
+['仙后座','cph-sch sch-nav nav-ruc ruc-seg'],
+['天鵝座','den-sad sad-alb dcy-sad sad-ecy'],
+['天琴座','veg-zlr zlr-dlr dlr-sul sul-shl shl-zlr'],
+['天鷹座','tar-atl atl-asn'],
+['天蠍座','gra-dsc dsc-ant ant-tsc tsc-esc esc-msc msc-zsc zsc-hsc hsc-sar sar-isc isc-ksc ksc-sha sha-les'],
+['獅子座','reg-hlf hlf-alg alg-zel zel-mul mul-els reg-tch tch-dnb dnb-zos zos-alg zos-tch'],
+['雙子座','cas-pol cas-mbs mbs-tej tej-prp pol-wsa wsa-mek mek-alh'],
+['金牛座','zta-ald gta-ths ths-ain ald-ths ain-eln'],
+['大犬座','sir-mrz sir-adh adh-wez wez-alu sir-mul2'],
+['牧夫座','arc-rho rho-izr izr-nek nek-seq seq-rho'],
+['南十字座','acx-gac mim-dcr'],
+['飛馬座','mkb-sct sct-apz apz-agb agb-mkb'],
+['仙女座','apz-mrc mrc-alm'],
+['武仙座','zhe-ehe ehe-pih pih-eth eth-zhe'],
+['人馬座','kau-asc asc-tsg tsg-nun nun-phs phs-kab kab-kam kam-kau kam-asl asl-kau'],
+['室女座','spi-hez hez-por por-zav por-vin hez-vin'],
+['北冕座','tcr-nus nus-aph aph-gcr gcr-dcb'],
+['御夫座','cap-mnk mnk-tha tha-eln eln-iau iau-cap'],
+['烏鴉座','gie-agr agr-kra kra-ecv ecv-gie'],
+['白羊座','ham-she she-mes'],
+['半人馬座','rkn-had had-mnt']
+].map(([zh,e])=>{
+  const edges=e.split(' ').map(x=>x.split('-').map(k=>SKEY[k]));
+  const set=new Set();edges.forEach(p=>p.forEach(s=>set.add(s)));
+  let x=0,y=0,z=0;set.forEach(s=>{x+=Math.cos(s.dec)*Math.cos(s.ra);y+=Math.cos(s.dec)*Math.sin(s.ra);z+=Math.sin(s.dec);});
+  const n=Math.hypot(x,y,z);
+  return{zh,edges,cra:normRad(Math.atan2(y,x)),cdec:Math.asin(z/n)};
+});
+
+/* ---- deep-sky objects (id|name|type|RA h|Dec|size arcmin|mag) ---- */
+const DSO_SRC=`M31|仙女座大星系|gal|0.7123|41.2692|190|3.4
+M33|三角座星系|gal|1.5641|30.6602|70|5.7
+M42|獵戶座大星雲|neb|5.5881|-5.3911|65|4.0
+M45|昴宿星團|oc|3.7900|24.1167|110|1.6
+M13|武仙座球狀星團|gc|16.6949|36.4613|20|5.8
+M1|蟹狀星雲|neb|5.5755|22.0145|6|8.4
+M44|蜂巢星團|oc|8.6667|19.6667|95|3.7
+M57|環狀星雲|neb|18.8931|33.0286|1.4|8.8
+M27|啞鈴星雲|neb|19.9934|22.7211|8|7.5
+M8|礁湖星雲|neb|18.0633|-24.3833|90|6.0
+M20|三裂星雲|neb|18.0433|-23.0300|28|6.3
+M17|奧米加星雲|neb|18.3467|-16.1717|11|6.0
+M16|鷹狀星雲|neb|18.3133|-13.8500|7|6.0
+M51|漩渦星系|gal|13.4979|47.1953|11|8.4
+M81|M81|gal|9.9258|69.0653|21|6.9
+M82|M82|gal|9.9314|69.6797|11|8.4
+M101|風車星系|gal|14.0534|54.3489|29|7.9
+M87|M87|gal|12.5137|12.3911|7|8.6
+M104|M104 草帽星系|gal|12.6667|-11.6231|9|8.0
+M64|黑眼睛星系|gal|12.9456|21.6828|10|8.5
+M63|向日葵星系|gal|13.2633|42.0292|12|8.6
+M106|M106|gal|12.3161|47.3039|18|8.4
+M3|M3|gc|13.7032|28.3773|18|6.2
+M5|M5|gc|15.3092|2.0811|17|5.7
+M22|M22|gc|18.6075|-23.9047|32|5.1
+M4|M4|gc|16.3931|-26.5258|36|5.6
+M15|M15|gc|21.4997|12.1670|12|6.2
+M92|M92|gc|17.2854|43.1359|14|6.3
+M6|蝴蝶星團 M6|oc|17.6683|-32.2167|25|4.2
+M7|托勒密星團 M7|oc|17.8983|-34.7933|80|3.3
+M11|野鴨星團 M11|oc|18.8510|-6.2700|14|5.8
+M35|M35|oc|6.1483|24.3333|28|5.3
+M36|M36|oc|5.6017|34.1400|12|6.0
+M37|M37|oc|5.8733|32.5533|24|5.6
+M38|M38|oc|5.4783|35.8500|21|6.4
+M41|M41|oc|6.7667|-20.7567|38|4.5
+M67|M67|oc|8.8500|11.8000|30|6.1
+NGC 5139|半人馬座 ω|gc|13.4465|-47.4795|55|3.7
+NGC 104|杜鵑座 47|gc|0.4013|-72.0814|50|4.0
+LMC|大麥哲倫雲|gal|5.3927|-69.7561|650|0.9
+SMC|小麥哲倫雲|gal|0.8772|-72.8003|320|2.7
+NGC 3372|船底座 η 星雲|neb|10.7500|-59.8667|120|1.0
+Sgr A*|銀河系中心|ctr|17.7611|-29.0078|2|99`;
+const DSOS=DSO_SRC.split('\n').map(l=>{const p=l.split('|');
+  const label=(p[1]===p[0]||p[1].indexOf(p[0])>=0)?p[1]:p[0]+' '+p[1];
+  return{id:p[0],n:label,t:p[2],ra:parseFloat(p[3])*15*D2R,dec:parseFloat(p[4])*D2R,size:parseFloat(p[5]),mag:parseFloat(p[6])};});
+const TYPE_ZH={gal:'星系',neb:'星雲',oc:'疏散星團',gc:'球狀星團',ctr:'銀心'};
+
+const PRESETS=[
+['獵戶座腰帶','Orion\'s Belt',5.6,-1.2,14],['獵戶座大星雲 M42','Orion Nebula M42',5.5881,-5.3911,1.5],['昴宿星團 M45','Pleiades M45',3.79,24.1167,4],
+['仙女座星系 M31','Andromeda Galaxy M31',0.7123,41.2692,3],['北極星','Polaris',2.5303,89.2641,12],['北斗七星','Big Dipper',12.4,56,35],
+['南十字座','Southern Cross',12.45,-60,25],['銀河系中心','Galactic Center',17.7611,-29.0078,25],['天琴座','Lyra',18.7,36,22],['夏季大三角','Summer Triangle',19.5,28,70],['全天','Whole sky',12,0,180]
+];
+const EN_CONS={'獵戶座':'Orion','大熊座':'Ursa Major','小熊座':'Ursa Minor','仙后座':'Cassiopeia','天鵝座':'Cygnus','天琴座':'Lyra','天鷹座':'Aquila','天蠍座':'Scorpius','獅子座':'Leo','雙子座':'Gemini','金牛座':'Taurus','大犬座':'Canis Major','牧夫座':'Boötes','南十字座':'Crux','飛馬座':'Pegasus','仙女座':'Andromeda','武仙座':'Hercules','人馬座':'Sagittarius','室女座':'Virgo','北冕座':'Corona Borealis','御夫座':'Auriga','烏鴉座':'Corvus','白羊座':'Aries','半人馬座':'Centaurus'};
+const EN_DSO={'M31':'Andromeda Galaxy','M33':'Triangulum Galaxy','M42':'Orion Nebula','M45':'Pleiades','M13':'Hercules Cluster','M1':'Crab Nebula','M44':'Beehive Cluster','M57':'Ring Nebula','M27':'Dumbbell Nebula','M8':'Lagoon Nebula','M20':'Trifid Nebula','M17':'Omega Nebula','M16':'Eagle Nebula','M51':'Whirlpool Galaxy','M101':'Pinwheel Galaxy','M104':'Sombrero Galaxy','M64':'Black Eye Galaxy','M63':'Sunflower Galaxy','M6':'Butterfly Cluster','M7':'Ptolemy Cluster','M11':'Wild Duck Cluster','NGC 5139':'Omega Centauri','NGC 104':'47 Tucanae','LMC':'Large Magellanic Cloud','SMC':'Small Magellanic Cloud','NGC 3372':'Carina Nebula','Sgr A*':'Galactic Center'};
+//</core>
+</script>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const cv=$('sky'),ctx=cv.getContext('2d'),stage=$('stage');
+let DPR=1,dirty=false,anim=null,sel=null;
+const reduceMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const L={cl:true,cn:true,sn:true,grid:true,ecl:false,mw:true,dso:true,ret:true};
+const T={
+zh:{title:'天球星圖',sub:'J2000 · 赤道座標',goto:'前往座標',ra:'赤經 RA',dec:'赤緯 Dec',fov:'天區大小 FOV（畫面短邊的視角）',auto:'自動',hours:'時',degs:'度',
+ phRA:'05h 35m 17s 或 83.82',phDec:'−05° 23′ 28″ 或 -5.39',raUnitAria:'赤經單位',unitAria:'視場單位',go:'前往',readc:'讀取畫面中心',
+ msgInit:'赤經、赤緯留空則只改變天區大小。',presets:'預設目標',layers:'圖層',zin:'放大',zout:'縮小',hover:'游標',center:'中心',fovl:'視場',
+ hint:'拖曳平移 · 滾輪縮放 · 點擊選點 · 雙擊放大',canvasAria:'天球星圖，可拖曳平移、滾輪縮放、點擊選取座標',hide:'收合',show:'展開',
+ selTitle:'選取點',selNone:'在星空上點一下，即可取得該點的座標。',dRA:'赤經',dDec:'赤緯',dL:'銀經 l',dB:'銀緯 b',dSep:'距中心',
+ selCenter:'置中',selCopy:'複製座標',copied:'已複製。',copyFail:'無法自動複製，請手動選取上方座標。',
+ mag:m=>(m<0?'−':'')+Math.abs(m).toFixed(2)+' 等',
+ types:{gal:'星系',neb:'星雲',oc:'疏散星團',gc:'球狀星團',ctr:'銀心'},
+ layerNames:{cl:'星座連線',cn:'星座名稱',sn:'恆星名稱',grid:'赤道座標格線',ecl:'黃道',mw:'銀河（示意）',dso:'深空天體',ret:'中心十字'},
+ needBoth:'赤經與赤緯需要一起輸入。',
+ badRA:'赤經無法辨識。可用 83.82、5.588h、05:35:17 或 5h 35m 17s。',
+ badDec:'赤緯需介於 −90° 與 +90°，例如 -5.39、-05 23 28。',
+ badFov:'天區大小需介於 2″ 與 180° 之間，且只能填一個數字。',
+ okGo:(a,b)=>'已前往 '+a+'、'+b+'。',okFov:'已更新天區大小。',filled:'已填入畫面中心座標。',
+ catnote:(n,m)=>'星表為內建的 '+n+' 顆亮星與 '+m+' 個深空天體，用於定位與示意，並非完整星表。銀河為依銀道面繪製的示意。'},
+en:{title:'Sky Atlas',sub:'J2000 · Equatorial',goto:'Go to coordinates',ra:'Right ascension (RA)',dec:'Declination (Dec)',fov:'Field of view (across the shorter screen side)',auto:'Auto',hours:'h',degs:'°',
+ phRA:'05h 35m 17s or 83.82',phDec:'−05° 23′ 28″ or -5.39',raUnitAria:'RA unit',unitAria:'FOV unit',go:'Go',readc:'Use view center',
+ msgInit:'Leave RA and Dec empty to change only the field of view.',presets:'Presets',layers:'Layers',zin:'Zoom in',zout:'Zoom out',hover:'Cursor',center:'Center',fovl:'FOV',
+ hint:'Drag to pan · Scroll to zoom · Click to pick · Double-click to zoom in',canvasAria:'Sky atlas: drag to pan, scroll to zoom, click to pick coordinates',hide:'Hide',show:'Show',
+ selTitle:'Selected point',selNone:'Click anywhere on the sky to read its coordinates.',dRA:'RA',dDec:'Dec',dL:'Gal. lon l',dB:'Gal. lat b',dSep:'From center',
+ selCenter:'Center on it',selCopy:'Copy coordinates',copied:'Copied.',copyFail:'Could not copy automatically. Please select the coordinates above.',
+ mag:m=>'mag '+(m<0?'−':'')+Math.abs(m).toFixed(2),
+ types:{gal:'Galaxy',neb:'Nebula',oc:'Open cluster',gc:'Globular cluster',ctr:'Galactic center'},
+ layerNames:{cl:'Constellation lines',cn:'Constellation names',sn:'Star names',grid:'Equatorial grid',ecl:'Ecliptic',mw:'Milky Way (schematic)',dso:'Deep-sky objects',ret:'Center crosshair'},
+ needBoth:'Enter both RA and Dec.',
+ badRA:'RA not recognized. Try 83.82, 5.588h, 05:35:17 or 5h 35m 17s.',
+ badDec:'Dec must be between −90° and +90°, e.g. -5.39 or -05 23 28.',
+ badFov:'FOV must be a single number between 2″ and 180°.',
+ okGo:(a,b)=>'Moved to '+a+', '+b+'.',okFov:'Field of view updated.',filled:'Filled in the view center.',
+ catnote:(n,m)=>'Built-in catalog of '+n+' bright stars and '+m+' deep-sky objects, for orientation only; it is not a complete star catalog. The Milky Way is a schematic drawn along the galactic plane.'}
+};
+let lang='zh';
+try{const sv=localStorage.getItem('sky-lang');lang=sv||((navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en');}catch(e){lang=(navigator.language||'').toLowerCase().indexOf('zh')===0?'zh':'en';}
+if(lang!=='zh'&&lang!=='en')lang='zh';
+const tr=k=>T[lang][k];
+const consName=c=>lang==='zh'?c.zh:(EN_CONS[c.zh]||c.zh);
+const dsoName=o=>lang==='zh'?o.n:(EN_DSO[o.id]?(o.id===EN_DSO[o.id]?o.id:o.id+' '+EN_DSO[o.id]):o.id);
+let lastMsg={k:'msgInit',err:false,a:null};
+
+/* ---- milky way blobs ---- */
+const MW=[];
+(function(){
+  for(let l=0;l<360;l+=4){
+    const dl=Math.min(l,360-l),d80=Math.abs(l-80);
+    const base=Math.min(1,0.28+0.72*Math.exp(-Math.pow(dl/48,2))+0.28*Math.exp(-Math.pow(d80/22,2)));
+    for(const b of[-13,-8,-4,0,4,8,13]){
+      const w=base*Math.exp(-Math.pow(b/8.5,2));
+      if(w<0.04)continue;
+      const e=galToEq(l*D2R,b*D2R);
+      MW.push({ra:e.ra,dec:e.dec,w,warm:dl<38});
+    }
+  }
+})();
+function makeSprite(rgb){
+  const c=document.createElement('canvas');c.width=c.height=96;const g=c.getContext('2d');
+  const gr=g.createRadialGradient(48,48,0,48,48,48);
+  gr.addColorStop(0,'rgba('+rgb+',1)');gr.addColorStop(.4,'rgba('+rgb+',.42)');gr.addColorStop(1,'rgba('+rgb+',0)');
+  g.fillStyle=gr;g.fillRect(0,0,96,96);return c;
+}
+const SPR_COOL=makeSprite('175,195,240'),SPR_WARM=makeSprite('245,205,160');
+
+const TINT={bet:'#ffb08a',ant:'#ff9f7c',ald:'#ffc08c',arc:'#ffcf9c',pol:'#ffd8aa',rig:'#a9c6ff',spi:'#a9c4ff',veg:'#d4e3ff',sir:'#e4efff',den:'#e8f0ff',alt:'#f2f2ff',atl:'#f2f2ff',bel:'#b4ccff',cap:'#fff0c8',pro:'#fff4de',reg:'#c8dcff',mim:'#a9c4ff',acx:'#a9c4ff',gac:'#ffb894',can:'#fff6e0'};
+const DSO_COL={gal:'#c79bff',neb:'#6fe3bc',oc:'#ffd96e',gc:'#ff9494',ctr:'#ffffff'};
+
+/* ---- sizing ---- */
+function resize(){
+  DPR=window.devicePixelRatio||1;
+  const W=stage.clientWidth,H=stage.clientHeight;
+  cv.width=Math.max(1,Math.round(W*DPR));cv.height=Math.max(1,Math.round(H*DPR));
+  setSize(W,H);requestRender();
+}
+new ResizeObserver(resize).observe(stage);
+
+function requestRender(){if(dirty)return;dirty=true;requestAnimationFrame(render);}
+
+/* ---- drawing ---- */
+const P={x:0,y:0,k:1},Q={x:0,y:0,k:1};
+function halo(text,x,y,color,align){
+  ctx.textAlign=align||'left';ctx.lineWidth=3;ctx.strokeStyle='rgba(2,4,10,.85)';ctx.strokeText(text,x,y);
+  ctx.fillStyle=color;ctx.fillText(text,x,y);
+}
+function drawMilkyWay(){
+  if(!L.mw||V.fov<6)return;
+  const fade=V.fov>=12?1:(V.fov-6)/6;
+  ctx.save();ctx.globalCompositeOperation='lighter';
+  const rad=10*D2R;
+  for(const m of MW){
+    if(!project(m.ra,m.dec,P))continue;
+    const r=V.S*P.k*rad;
+    if(P.x<-r||P.x>V.W+r||P.y<-r||P.y>V.H+r)continue;
+    if(r>5000)continue;
+    ctx.globalAlpha=0.05*m.w*fade;
+    ctx.drawImage(m.warm?SPR_WARM:SPR_COOL,P.x-r,P.y-r,2*r,2*r);
+  }
+  ctx.restore();
+}
+function drawGrid(){
+  if(!L.grid)return;
+  const fov=V.fov,step=pickStep(fov/5);
+  const span=Math.min(fov,180),decC=V.dec*R2D,raC=V.ra*R2D;
+  const dmin=Math.max(-90,decC-span),dmax=Math.min(90,decC+span);
+  let raSpan=180;
+  if(Math.abs(decC)+span<89){raSpan=Math.min(180,span/Math.max(Math.cos((Math.abs(decC)+span)*D2R),0.05));}
+  const sampleDeg=Math.max(fov/25,1e-4);
+  ctx.save();ctx.lineWidth=1;ctx.strokeStyle='rgba(95,140,210,.28)';
+  const decLab=[],raLab=[];
+  // meridians (constant RA)
+  const r0=Math.ceil((raC-raSpan)/step-1e-9),r1=Math.floor((raC+raSpan)/step+1e-9);
+  for(let i=r0;i<=r1;i++){
+    if(r1-r0>400)break;
+    const ra=i*step*D2R,n=clamp(Math.ceil((dmax-dmin)/sampleDeg)+1,2,220);
+    ctx.beginPath();let pen=false,best=null,bd=1e9;
+    for(let j=0;j<=n;j++){
+      const d=(dmin+(dmax-dmin)*j/n)*D2R;
+      if(!project(ra,d,P)){pen=false;continue;}
+      if(pen)ctx.lineTo(P.x,P.y);else{ctx.moveTo(P.x,P.y);pen=true;}
+      if(P.x>8&&P.x<V.W-8&&P.y>8&&P.y<V.H-8){const dd=Math.abs(P.y-(V.H-56));if(dd<bd){bd=dd;best={x:P.x,y:P.y};}}
+    }
+    ctx.stroke();
+    if(best)raLab.push({x:best.x,y:best.y,t:labRA(i*step,step)});
+  }
+  // parallels (constant Dec)
+  const d0=Math.ceil(dmin/step-1e-9),d1=Math.floor(dmax/step+1e-9);
+  for(let i=d0;i<=d1;i++){
+    const dec=i*step;if(Math.abs(dec)>=89.9999)continue;
+    const cd=Math.max(Math.cos(dec*D2R),0.05);
+    const n=clamp(Math.ceil(2*raSpan*cd/sampleDeg)+1,2,260);
+    ctx.beginPath();let pen=false,best=null,bd=1e9;
+    for(let j=0;j<=n;j++){
+      const ra=(raC-raSpan+2*raSpan*j/n)*D2R;
+      if(!project(ra,dec*D2R,P)){pen=false;continue;}
+      if(pen)ctx.lineTo(P.x,P.y);else{ctx.moveTo(P.x,P.y);pen=true;}
+      if(P.x>8&&P.x<V.W-8&&P.y>8&&P.y<V.H-8){const dd=Math.abs(P.x-70);if(dd<bd){bd=dd;best={x:P.x,y:P.y};}}
+    }
+    ctx.stroke();
+    if(best)decLab.push({x:best.x,y:best.y,t:labDec(dec,step)});
+  }
+  // equator + poles hint
+  ctx.restore();
+  ctx.save();ctx.font='11px '+getComputedStyle(document.body).getPropertyValue('--mono');
+  for(const l of decLab)halo(l.t,l.x+4,l.y-4,'rgba(130,170,235,.85)');
+  for(const l of raLab)halo(l.t,l.x+4,l.y-4,'rgba(130,170,235,.85)');
+  ctx.restore();
+}
+function drawEcliptic(){
+  if(!L.ecl)return;
+  const eps=23.4393*D2R;
+  ctx.save();ctx.strokeStyle='rgba(255,205,110,.5)';ctx.lineWidth=1;ctx.setLineDash([6,5]);
+  ctx.beginPath();let pen=false;
+  for(let lam=0;lam<=360;lam+=1){
+    const t=lam*D2R,ra=Math.atan2(Math.sin(t)*Math.cos(eps),Math.cos(t)),dec=Math.asin(Math.sin(t)*Math.sin(eps));
+    if(!project(ra,dec,P)){pen=false;continue;}
+    if(pen)ctx.lineTo(P.x,P.y);else{ctx.moveTo(P.x,P.y);pen=true;}
+  }
+  ctx.stroke();ctx.restore();
+}
+function drawConstellations(){
+  if(L.cl){
+    ctx.save();ctx.strokeStyle='rgba(110,150,225,.55)';ctx.lineWidth=1.1;ctx.beginPath();
+    for(const c of CONS)for(const e of c.edges){
+      if(!project(e[0].ra,e[0].dec,P)||!project(e[1].ra,e[1].dec,Q))continue;
+      ctx.moveTo(P.x,P.y);ctx.lineTo(Q.x,Q.y);
+    }
+    ctx.stroke();ctx.restore();
+  }
+  if(L.cn&&V.fov<=140){
+    ctx.save();ctx.font='500 13px '+getComputedStyle(document.body).getPropertyValue('--font');
+    for(const c of CONS){
+      if(!project(c.cra,c.cdec,P))continue;
+      if(P.x<20||P.x>V.W-20||P.y<20||P.y>V.H-20)continue;
+      halo(consName(c),P.x,P.y,'rgba(150,185,245,.7)','center');
+    }
+    ctx.restore();
+  }
+}
+const placed=[];
+function freeSpot(x,y,w,h){
+  for(const r of placed)if(x<r.x+r.w&&x+w>r.x&&y<r.y+r.h&&y+h>r.y)return false;
+  placed.push({x,y,w,h});return true;
+}
+function drawDSO(){
+  if(!L.dso||V.fov>120)return;
+  ctx.save();ctx.font='12px '+getComputedStyle(document.body).getPropertyValue('--font');ctx.lineWidth=1.2;
+  for(const o of DSOS){
+    if(!project(o.ra,o.dec,P))continue;
+    const half=Math.max(5,V.S*P.k*(o.size/60)*D2R/2);
+    if(P.x<-half||P.x>V.W+half||P.y<-half||P.y>V.H+half)continue;
+    if(V.fov>40&&o.size<20&&o.mag>6)continue;
+    const col=DSO_COL[o.t];ctx.strokeStyle=col;ctx.setLineDash([]);ctx.globalAlpha=.9;
+    ctx.beginPath();
+    if(o.t==='gal'){ctx.ellipse(P.x,P.y,half,half*.55,-.5,0,TAU);}
+    else if(o.t==='neb'){ctx.rect(P.x-half,P.y-half,2*half,2*half);}
+    else if(o.t==='oc'){ctx.setLineDash([3,3]);ctx.arc(P.x,P.y,half,0,TAU);}
+    else if(o.t==='gc'){ctx.arc(P.x,P.y,half,0,TAU);ctx.moveTo(P.x-half,P.y);ctx.lineTo(P.x+half,P.y);ctx.moveTo(P.x,P.y-half);ctx.lineTo(P.x,P.y+half);}
+    else{ctx.arc(P.x,P.y,6,0,TAU);ctx.moveTo(P.x-11,P.y);ctx.lineTo(P.x+11,P.y);ctx.moveTo(P.x,P.y-11);ctx.lineTo(P.x,P.y+11);}
+    ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+    const nm=dsoName(o),w=ctx.measureText(nm).width,lx=P.x+half+4,ly=P.y+4;
+    if(freeSpot(lx,ly-11,w,14))halo(nm,lx,ly,col);
+  }
+  ctx.restore();
+}
+function drawStars(){
+  const zf=clamp(1+0.3*Math.log10(90/V.fov),0.8,2.6);
+  const lim=V.fov>90?1.3:V.fov>40?2.0:V.fov>15?2.8:V.fov>5?3.6:99;
+  ctx.save();ctx.font='12px '+getComputedStyle(document.body).getPropertyValue('--font');
+  for(const s of STARS){
+    if(!project(s.ra,s.dec,P))continue;
+    if(P.x<-30||P.x>V.W+30||P.y<-30||P.y>V.H+30)continue;
+    const r=Math.min(9,Math.max(0.7,(4.4-s.mag)*0.62+0.9)*zf);
+    const col=TINT[s.k]||'#ffffff';
+    if(s.mag<3){
+      const g=ctx.createRadialGradient(P.x,P.y,0,P.x,P.y,r*4);
+      g.addColorStop(0,'rgba(190,210,255,.30)');g.addColorStop(1,'rgba(190,210,255,0)');
+      ctx.fillStyle=g;ctx.beginPath();ctx.arc(P.x,P.y,r*4,0,TAU);ctx.fill();
+    }
+    ctx.fillStyle=col;ctx.beginPath();ctx.arc(P.x,P.y,r,0,TAU);ctx.fill();
+    if(L.sn&&s.mag<=lim){
+      const w=ctx.measureText(s.n).width,lx=P.x+r+4,ly=P.y+4;
+      if(freeSpot(lx,ly-11,w,14))halo(s.n,lx,ly,'rgba(205,218,240,.82)');
+    }
+  }
+  ctx.restore();
+}
+function drawSelection(){
+  if(!sel||!project(sel.ra,sel.dec,P))return;
+  const x=P.x,y=P.y,a=getComputedStyle(document.body).getPropertyValue('--accent').trim()||'#ffb347';
+  ctx.save();ctx.strokeStyle=a;ctx.lineWidth=1.6;
+  ctx.beginPath();ctx.arc(x,y,11,0,TAU);
+  ctx.moveTo(x-20,y);ctx.lineTo(x-14,y);ctx.moveTo(x+14,y);ctx.lineTo(x+20,y);
+  ctx.moveTo(x,y-20);ctx.lineTo(x,y-14);ctx.moveTo(x,y+14);ctx.lineTo(x,y+20);ctx.stroke();
+  ctx.font='500 12px '+getComputedStyle(document.body).getPropertyValue('--mono');
+  const prec=V.fov>1?0:1;
+  halo(fmtHMS(sel.ra*R2D,prec)+'  '+fmtDMS(sel.dec*R2D,prec),x+24,y-8,a);
+  ctx.restore();
+}
+function drawReticle(){
+  if(!L.ret)return;
+  ctx.save();ctx.strokeStyle='rgba(220,230,250,.35)';ctx.lineWidth=1;ctx.beginPath();
+  ctx.moveTo(V.cx-9,V.cy);ctx.lineTo(V.cx+9,V.cy);ctx.moveTo(V.cx,V.cy-9);ctx.lineTo(V.cx,V.cy+9);ctx.stroke();ctx.restore();
+}
+function render(){
+  dirty=false;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const g=ctx.createRadialGradient(V.cx,V.cy,0,V.cx,V.cy,Math.hypot(V.W,V.H)/2);
+  g.addColorStop(0,'#0b1429');g.addColorStop(1,'#02030a');
+  ctx.fillStyle=g;ctx.fillRect(0,0,V.W,V.H);
+  placed.length=0;
+  drawMilkyWay();drawGrid();drawEcliptic();drawConstellations();drawDSO();drawStars();drawSelection();drawReticle();
+  updateReadout();
+}
+
+/* ---- readouts ---- */
+const hovEl=$('hov'),ctrEl=$('ctr'),fovEl=$('fovread');
+function precFor(){return{r:V.fov>3?0:V.fov>0.3?1:2,d:V.fov>3?0:V.fov>0.3?1:2};}
+function coordText(ra,dec){const p=precFor();return'RA '+fmtHMS(ra*R2D,p.r)+'  Dec '+fmtDMS(dec*R2D,p.d);}
+function updateReadout(){
+  ctrEl.textContent=coordText(V.ra,V.dec);
+  const a=unproject(0,V.cy),b=unproject(V.W,V.cy),c=unproject(V.cx,0),d=unproject(V.cx,V.H);
+  const w=sep(a.ra,a.dec,b.ra,b.dec)*R2D,h=sep(c.ra,c.dec,d.ra,d.dec)*R2D;
+  fovEl.textContent=fmtAng(w)+' × '+fmtAng(h);
+  const fi=$('fov');
+  if(document.activeElement!==fi&&document.activeElement!==$('unit')){
+    const f=V.fov;let u='1',v=f;
+    if(f<1/60*10){u='3600';v=f*3600;}else if(f<1){u='60';v=f*60;}
+    $('unit').value=u;fi.value=String(+v.toFixed(v>=100?0:v>=10?1:2));
+  }
+}
+function hover(x,y){
+  const s=unproject(x,y);
+  const gl=eqToGal(s.ra,s.dec);
+  hovEl.textContent=coordText(s.ra,s.dec)+'  l '+(gl.l*R2D).toFixed(2)+'° b '+(gl.b*R2D>=0?'+':'−')+Math.abs(gl.b*R2D).toFixed(2)+'°';
+}
+
+/* ---- selection ---- */
+function nearestObject(ra,dec,px,py){
+  let best=null,bd=16;
+  for(const s of STARS){if(!project(s.ra,s.dec,P))continue;const d=Math.hypot(P.x-px,P.y-py);if(d<bd){bd=d;best={kind:'star',o:s};}}
+  for(const o of DSOS){if(!project(o.ra,o.dec,P))continue;const half=Math.max(5,V.S*P.k*(o.size/60)*D2R/2);const d=Math.max(0,Math.hypot(P.x-px,P.y-py)-Math.min(half,40));if(d<bd){bd=d;best={kind:'dso',o:o};}}
+  return best;
+}
+const selEl=$('sel');
+function renderSel(){
+  if(!sel){selEl.innerHTML='<h2>'+tr('selTitle')+'</h2><p class="none">'+tr('selNone')+'</p>';return;}
+  const gl=eqToGal(sel.ra,sel.dec),sepC=sep(sel.ra,sel.dec,V.ra,V.dec)*R2D;
+  let name='';
+  if(sel.hit){
+    const sub=sel.hit.kind==='star'?tr('mag')(sel.hit.o.mag):tr('types')[sel.hit.o.t];
+    const nm=sel.hit.kind==='star'?sel.hit.o.n:dsoName(sel.hit.o);
+    name='<p class="name">'+nm+'<span style="color:var(--muted);font-weight:400"> · '+sub+'</span></p>';
+  }
+  selEl.innerHTML='<h2>'+tr('selTitle')+'</h2>'+name+'<dl>'
+   +'<dt>'+tr('dRA')+'</dt><dd>'+fmtHMS(sel.ra*R2D,2)+'</dd>'
+   +'<dt></dt><dd>'+(sel.ra*R2D).toFixed(5)+'°</dd>'
+   +'<dt>'+tr('dDec')+'</dt><dd>'+fmtDMS(sel.dec*R2D,1)+'</dd>'
+   +'<dt></dt><dd>'+(sel.dec*R2D>=0?'+':'−')+Math.abs(sel.dec*R2D).toFixed(5)+'°</dd>'
+   +'<dt>'+tr('dL')+'</dt><dd>'+(gl.l*R2D).toFixed(3)+'°</dd>'
+   +'<dt>'+tr('dB')+'</dt><dd>'+(gl.b*R2D>=0?'+':'−')+Math.abs(gl.b*R2D).toFixed(3)+'°</dd>'
+   +'<dt>'+tr('dSep')+'</dt><dd>'+fmtAng(sepC)+'</dd></dl>'
+   +'<div class="row" style="margin-top:8px"><button type="button" id="selCenter">'+tr('selCenter')+'</button><button type="button" id="selCopy">'+tr('selCopy')+'</button></div>'
+   +'<p class="fine" id="copyMsg"></p>';
+  $('selCenter').onclick=()=>flyTo(sel.ra,sel.dec,V.fov);
+  $('selCopy').onclick=()=>{
+    const txt='RA '+fmtHMS(sel.ra*R2D,2)+', Dec '+fmtDMS(sel.dec*R2D,1)+' ('+(sel.ra*R2D).toFixed(5)+', '+(sel.dec*R2D).toFixed(5)+')';
+    const m=$('copyMsg');
+    try{navigator.clipboard.writeText(txt).then(()=>{m.textContent=tr('copied');},()=>{m.textContent=tr('copyFail');});}
+    catch(e){m.textContent=tr('copyFail');}
+  };
+}
+function fillInputs(ra,dec){
+  $('raUnit').value='auto';
+  $('ra').value=fmtHMS(ra*R2D,2);$('dec').value=fmtDMS(dec*R2D,1);
+  $('ra').removeAttribute('aria-invalid');$('dec').removeAttribute('aria-invalid');
+}
+function select(ra,dec,px,py){
+  let hit=null;
+  if(px!=null){hit=nearestObject(ra,dec,px,py);if(hit){ra=hit.o.ra;dec=hit.o.dec;}}
+  sel={ra,dec,hit};fillInputs(ra,dec);renderSel();requestRender();
+}
+
+/* ---- animation ---- */
+function cancelAnim(){if(anim){cancelAnimationFrame(anim);anim=null;}}
+function flyTo(ra,dec,fov){
+  cancelAnim();
+  if(reduceMotion){setView(ra,dec,fov);requestRender();return;}
+  const s={ra:V.ra,dec:V.dec,lf:Math.log(V.fov)};
+  const dRa=angDiff(ra,s.ra),dDec=dec-s.dec,dLf=Math.log(clamp(fov,0.001,180))-s.lf;
+  const t0=performance.now(),dur=750;
+  const step=now=>{
+    const t=Math.min(1,(now-t0)/dur),e=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    setView(s.ra+dRa*e,s.dec+dDec*e,Math.exp(s.lf+dLf*e));render();
+    anim=t<1?requestAnimationFrame(step):null;
+  };
+  anim=requestAnimationFrame(step);
+}
+
+/* ---- pointer / wheel / keys ---- */
+const pts=new Map();let drag=null,pinch=null;
+function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+cv.addEventListener('pointerdown',e=>{
+  cancelAnim();cv.setPointerCapture(e.pointerId);
+  const p=pos(e);pts.set(e.pointerId,p);
+  if(pts.size===1){drag={start:p,moved:false,anchor:unproject(p.x,p.y)};}
+  else if(pts.size===2){
+    const[a,b]=[...pts.values()];
+    pinch={d0:Math.hypot(a.x-b.x,a.y-b.y)||1,fov0:V.fov,anchor:unproject((a.x+b.x)/2,(a.y+b.y)/2)};
+    if(drag)drag.moved=true;
+  }
+});
+cv.addEventListener('pointermove',e=>{
+  const p=pos(e);
+  if(pts.has(e.pointerId))pts.set(e.pointerId,p);
+  if(pinch&&pts.size>=2){
+    const[a,b]=[...pts.values()],d=Math.hypot(a.x-b.x,a.y-b.y);
+    setView(V.ra,V.dec,pinch.fov0*pinch.d0/Math.max(d,1));
+    anchorTo(pinch.anchor,(a.x+b.x)/2,(a.y+b.y)/2);requestRender();return;
+  }
+  if(drag&&pts.size===1){
+    if(!drag.moved&&Math.hypot(p.x-drag.start.x,p.y-drag.start.y)>4){drag.moved=true;cv.classList.add('grabbing');}
+    if(drag.moved){anchorTo(drag.anchor,p.x,p.y);requestRender();}
+  }
+  if(e.pointerType==='mouse')hover(p.x,p.y);
+});
+function endPointer(e,allowSelect){
+  const p=pos(e);
+  if(allowSelect&&drag&&!drag.moved&&pts.size===1){const s=unproject(p.x,p.y);select(s.ra,s.dec,p.x,p.y);}
+  pts.delete(e.pointerId);
+  if(pts.size<2)pinch=null;
+  if(pts.size===0){drag=null;cv.classList.remove('grabbing');}
+  else if(pts.size===1&&!drag){/* remaining finger after pinch does nothing */}
+}
+cv.addEventListener('pointerup',e=>endPointer(e,true));
+cv.addEventListener('pointercancel',e=>endPointer(e,false));
+cv.addEventListener('wheel',e=>{
+  e.preventDefault();cancelAnim();
+  const p=pos(e),dy=e.deltaY*(e.deltaMode===1?16:1),sky=unproject(p.x,p.y);
+  setView(V.ra,V.dec,V.fov*Math.exp(clamp(dy,-300,300)*0.0014));
+  anchorTo(sky,p.x,p.y);requestRender();hover(p.x,p.y);
+},{passive:false});
+cv.addEventListener('dblclick',e=>{
+  const p=pos(e),s=unproject(p.x,p.y);flyTo(s.ra,s.dec,V.fov/2.5);
+});
+function zoomBy(f){cancelAnim();setView(V.ra,V.dec,V.fov*f);requestRender();}
+$('zin').onclick=()=>zoomBy(1/1.6);
+$('zout').onclick=()=>zoomBy(1.6);
+window.addEventListener('keydown',e=>{
+  const t=e.target&&e.target.tagName;
+  if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA'||e.ctrlKey||e.metaKey||e.altKey)return;
+  const st=V.fov*D2R*0.12;let h=true;
+  if(e.key==='ArrowLeft')setView(V.ra+st/Math.max(V.cd,0.05),V.dec,V.fov);
+  else if(e.key==='ArrowRight')setView(V.ra-st/Math.max(V.cd,0.05),V.dec,V.fov);
+  else if(e.key==='ArrowUp')setView(V.ra,V.dec+st,V.fov);
+  else if(e.key==='ArrowDown')setView(V.ra,V.dec-st,V.fov);
+  else if(e.key==='+'||e.key==='=')setView(V.ra,V.dec,V.fov/1.3);
+  else if(e.key==='-'||e.key==='_')setView(V.ra,V.dec,V.fov*1.3);
+  else h=false;
+  if(h){e.preventDefault();cancelAnim();requestRender();}
+});
+
+/* ---- form ---- */
+const msg=$('msg');
+function say(k,err,a){lastMsg={k,err:!!err,a:a||null};const v=tr(k);msg.textContent=typeof v==='function'?v.apply(null,a||[]):v;msg.className=err?'err':'';}
+$('goto').addEventListener('submit',e=>{
+  e.preventDefault();
+  const raS=$('ra').value.trim(),decS=$('dec').value.trim(),fovS=$('fov').value.trim();
+  $('ra').removeAttribute('aria-invalid');$('dec').removeAttribute('aria-invalid');$('fov').removeAttribute('aria-invalid');
+  let ra=V.ra*R2D,dec=V.dec*R2D,fov=V.fov,hasPoint=false;
+  if(raS||decS){
+    if(!raS||!decS){say('needBoth',true);(raS?$('dec'):$('ra')).setAttribute('aria-invalid','true');return;}
+    const r=parseRA(raS,$('raUnit').value),d=parseDec(decS);
+    if(isNaN(r)){say('badRA',true);$('ra').setAttribute('aria-invalid','true');return;}
+    if(isNaN(d)){say('badDec',true);$('dec').setAttribute('aria-invalid','true');return;}
+    ra=r;dec=d;hasPoint=true;
+  }
+  if(fovS){
+    const f=parseFov(fovS,parseFloat($('unit').value));
+    if(isNaN(f)){say('badFov',true);$('fov').setAttribute('aria-invalid','true');return;}
+    fov=f;
+  }
+  if(hasPoint)say('okGo',false,[fmtHMS(ra,1),fmtDMS(dec,0)]);else say('okFov');
+  if(hasPoint){sel={ra:ra*D2R,dec:dec*D2R,hit:null};const h=null;renderSel();}
+  flyTo(ra*D2R,dec*D2R,fov);
+});
+$('readc').onclick=()=>{fillInputs(V.ra,V.dec);say('filled');};
+$('collapse').onclick=()=>{
+  const p=$('panel'),c=p.dataset.collapsed!=='true';
+  p.dataset.collapsed=String(c);$('collapse').textContent=c?tr('show'):tr('hide');$('collapse').setAttribute('aria-expanded',String(!c));
+};
+
+/* ---- presets + layers ---- */
+const chips=$('presets');
+const presetBtns=[];
+PRESETS.forEach(([zh,en,rah,dec,fov])=>{
+  const b=document.createElement('button');b.type='button';
+  b.onclick=()=>{
+    const ra=rah*15*D2R,de=dec*D2R;
+    if(zh!=='全天'){sel={ra,dec:de,hit:null};fillInputs(ra,de);renderSel();}
+    flyTo(ra,de,fov);
+  };
+  chips.appendChild(b);presetBtns.push([b,zh,en]);
+});
+const lay=$('layers');
+const layerTxt={};
+Object.keys(L).forEach(k=>{
+  const lb=document.createElement('label'),cb=document.createElement('input'),tx=document.createTextNode('');
+  cb.type='checkbox';cb.checked=L[k];cb.id='ly-'+k;
+  cb.onchange=()=>{L[k]=cb.checked;requestRender();};
+  lb.appendChild(cb);lb.appendChild(tx);lay.appendChild(lb);layerTxt[k]=tx;
+});
+
+/* ---- language ---- */
+function applyLang(){
+  document.documentElement.lang=lang==='zh'?'zh-Hant':'en';
+  document.title=tr('title');
+  document.querySelectorAll('[data-i18n]').forEach(el=>{el.textContent=tr(el.dataset.i18n);});
+  document.querySelectorAll('[data-i18n-ph]').forEach(el=>{el.placeholder=tr(el.dataset.i18nPh);});
+  document.querySelectorAll('[data-i18n-aria]').forEach(el=>{el.setAttribute('aria-label',tr(el.dataset.i18nAria));});
+  $('lang').textContent=lang==='zh'?'EN':'中文';
+  $('collapse').textContent=$('panel').dataset.collapsed==='true'?tr('show'):tr('hide');
+  Object.keys(layerTxt).forEach(k=>{layerTxt[k].nodeValue=tr('layerNames')[k];});
+  presetBtns.forEach(([b,zh,en])=>{b.textContent=lang==='zh'?zh:en;});
+  $('catnote').textContent=tr('catnote')(STARS.length,DSOS.length);
+  say(lastMsg.k,lastMsg.err,lastMsg.a);
+  renderSel();requestRender();
+}
+$('lang').onclick=()=>{lang=lang==='zh'?'en':'zh';try{localStorage.setItem('sky-lang',lang);}catch(e){}applyLang();};
+
+/* ---- start ---- */
+if(window.innerWidth<640){$('panel').dataset.collapsed='true';$('collapse').setAttribute('aria-expanded','false');}
+applyLang();
+setView(5.6*15*D2R,-1.2*D2R,60);
+resize();
+})();
+</script>
+
