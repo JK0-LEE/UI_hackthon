@@ -21,6 +21,7 @@ panel.innerHTML=[
 '<div class="spx-meta"><span id="spx-epoch">Epoch —</span><span id="spx-wave">λ —</span></div>',
 '<div class="spx-controls"><button id="spx-prev" type="button">◀ Prev</button><button id="spx-play" type="button" aria-pressed="false">▶ Blink</button><button id="spx-next" type="button">Next ▶</button><button id="spx-difference" type="button" aria-pressed="false">Difference</button></div>',
 '<input id="spx-slider" type="range" min="0" max="0" value="0" aria-label="Epoch position">',
+'<label class="spx-note" for="spx-brightness">Display brightness (visual only) <input id="spx-brightness" type="range" min="1" max="10" value="3" step="0.5" aria-label="Display brightness"></label>',
 '<label id="spx-toggle-markers"><input id="spx-markers-on" type="checkbox" checked> Source markers (science-image pixel positions)</label>',
 '<p id="spx-status" role="status" aria-live="polite"></p>',
 '<div id="spx-caveat" hidden></div><div id="spx-source-detail" aria-live="polite">Select a source marker to inspect details.</div>',
@@ -30,6 +31,7 @@ panel.innerHTML=[
 document.body.append(launch,panel);
 panel.hidden=true;
 const image=$('spx-image'),box=$('spx-imagebox'),markers=$('spx-markers');
+image.style.filter='brightness(3) contrast(1.1)';
 function status(message,error=false){$('spx-status').textContent=message;$('spx-status').classList.toggle('error',error);}
 function current(){return app.data?.frames?.[app.index]||null;}
 function frameImage(){return app.diff?app.data?.difference:current();}
@@ -170,6 +172,7 @@ $('spx-play').onclick=play;
 $('spx-difference').onclick=()=>{stop();app.diff=!app.diff;render();};
 $('spx-slider').oninput=e=>{stop();changeFrame(Number(e.target.value));};
 $('spx-markers-on').onchange=e=>{app.markers=e.target.checked;drawMarkers();};
+$('spx-brightness').oninput=e=>{image.style.filter='brightness('+Number(e.target.value)+') contrast(1.1)';};
 $('spx-import-img').onclick=()=>$('spx-file-img').click();
 $('spx-import-json').onclick=()=>$('spx-file-json').click();
 $('spx-file-img').onchange=async e=>{try{await importImages(e.target.files);}catch(err){status(String(err.message||err),true);}e.target.value='';};
