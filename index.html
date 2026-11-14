@@ -90,6 +90,7 @@ button.primary:hover{filter:brightness(1.08)}
 @media (max-width:640px){#bar .hint{display:none}#pbody{max-height:58vh}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
+<link rel="stylesheet" href="./spherex-viewer.css">
 
 <main id="stage">
   <canvas id="sky" aria-label="天球星圖，可拖曳平移、滾輪縮放、點擊選取座標" data-i18n-aria="canvasAria" tabindex="0"></canvas>
@@ -1065,6 +1066,7 @@ function select(ra,dec,px,py){
   let hit=null;
   if(px!=null){hit=nearestObject(ra,dec,px,py);if(hit){ra=hit.o.ra;dec=hit.o.dec;}}
   sel={ra,dec,hit};fillInputs(ra,dec);renderSel();requestRender();
+  if(hit&&hit.kind==='spx')window.dispatchEvent(new CustomEvent('spherex:select-source',{detail:{source:hit.o}}));
 }
 
 /* ---- animation ---- */
@@ -1216,6 +1218,20 @@ function applyLang(){
 }
 $('lang').onclick=()=>{lang=lang==='zh'?'en':'zh';try{localStorage.setItem('sky-lang',lang);}catch(e){}applyLang();};
 
+/* Public bridge: clicking science-image markers focuses the matching sky position.
+   Uses RA/Dec, never assumes detector or image pixels equal sky canvas pixels. */
+window.SkyAtlas={
+  focusSource(source){
+    const item=normalizeSPHEREx([source])[0];if(!item)return false;
+    const hit=spherexSources.find(x=>x.source_id===item.source_id)||item;
+    sel={ra:hit.ra,dec:hit.dec,hit:{kind:'spx',o:hit}};
+    fillInputs(hit.ra,hit.dec);renderSel();
+    flyTo(hit.ra,hit.dec,Math.min(V.fov,1.5));requestRender();
+    return true;
+  },
+  getView(){return{ra_deg:V.ra*R2D,dec_deg:V.dec*R2D,fov_deg:V.fov};}
+};
+
 /* ---- start ---- */
 if(window.innerWidth<640){$('panel').dataset.collapsed='true';$('collapse').setAttribute('aria-expanded','false');}
 applyLang();
@@ -1223,3 +1239,6 @@ setView(5.6*15*D2R,-1.2*D2R,60);
 resize();
 })();
 </script>
+
+<script src="./spherex-demo.js"></script>
+<script src="./spherex-viewer.js"></script>
