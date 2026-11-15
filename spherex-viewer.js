@@ -29,6 +29,9 @@ panel.innerHTML=[
 '</div>'
 ].join('');
 document.body.append(launch,panel);
+// Place the viewer control inside the reference design's top navigation.
+const headerActions=document.querySelector('#top .top-actions');
+if(headerActions)headerActions.prepend(launch);
 panel.hidden=true;
 const image=$('spx-image'),box=$('spx-imagebox'),markers=$('spx-markers');
 image.style.filter='brightness(3) contrast(1.1)';
